@@ -1,0 +1,35 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fort-api:prod
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      CHAT_MODEL: ${CHAT_MODEL:-qwen3:4b}
+    volumes:
+      - ./models:/app/Fort_project/models:ro
+      - ./data/indexes:/app/Fort_project/data/indexes:ro
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./app/frontend
+      dockerfile: Dockerfile
+    image: fort-web:prod
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

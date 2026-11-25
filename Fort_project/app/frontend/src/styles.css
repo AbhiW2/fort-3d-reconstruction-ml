@@ -460,6 +460,10 @@ button:focus-visible, a:focus-visible {
 .message-author { display: block; margin-bottom: 7px; color: var(--gold-bright); font-size: 7px; font-weight: 700; letter-spacing: .14em; }
 .chat-message.user .message-author { color: #cab48b; text-align: right; }
 .message-content > p { margin: 0; color: #d7d5ce; font-size: 11px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rag-sources { margin-top: 11px; padding-top: 9px; border-top: 1px solid var(--line); }
+.rag-sources > strong { color: #e7d4ad; font-size: 9px; }
+.rag-sources ul { display: grid; gap: 5px; margin: 7px 0; padding: 0; list-style: none; }
+.rag-sources li, .rag-sources small { color: #aaa9a2; font-size: 8px; line-height: 1.5; overflow-wrap: anywhere; }
 .message-context { display: flex; justify-content: flex-end; align-items: center; gap: 5px; margin-top: 9px; color: #cbb27f; font-size: 8px; }
 .message-photo { display: block; width: min(200px, 100%); max-height: 150px; margin: 9px 0 0 auto; border: 1px solid var(--line); border-radius: 5px; object-fit: cover; }
 .message-result { margin-top: 11px; }

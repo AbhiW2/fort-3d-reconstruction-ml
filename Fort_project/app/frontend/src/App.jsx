@@ -75,7 +75,7 @@ const features = [
   {
     icon: MessageCircle,
     title: "Ask questions",
-    description: "A dedicated history assistant is coming soon.",
+    description: "Ask about fort history across seven indexed sources.",
     label: "About the project",
     action: "about",
   },
@@ -237,12 +237,12 @@ export default function App() {
             <span className="step-number">03</span>
             <span className="step-icon"><MessageCircle size={20} /></span>
             <h3>Ask and explore</h3>
-            <p>Send your question and review the model's highlighted detections.</p>
+            <p>Ask a history question and review citations to the source PDFs.</p>
           </article>
         </div>
         <div className="how-to-note">
           <ShieldCheck size={16} />
-          The current AI model detects gateways in photos; historical chat answers are not enabled yet.
+          Historical answers search all seven indexed PDFs and include source pages; photo detection is a separate model.
         </div>
         <button className="button button-gold how-to-cta" onClick={() => openAnalysis()}>
           Try it with a photo <ArrowRight size={16} />

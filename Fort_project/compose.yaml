@@ -1,0 +1,23 @@
+services:
+  api:
+    image: fort-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - ./models:/app/Fort_project/models:ro
+      - ./data/indexes:/app/Fort_project/data/indexes:ro
+
+  web:
+    image: fort-web:local
+    build:
+      context: ./app/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - api

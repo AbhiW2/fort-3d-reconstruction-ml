@@ -6,8 +6,11 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from PIL import Image, ImageOps, UnidentifiedImageError
 from ultralytics import YOLO
+
+from .rag_service import RAGService
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,11 +19,16 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "yolo" / "gateway_best.pt"
 
 
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=2000)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not MODEL_PATH.is_file():
         raise RuntimeError(f"YOLO model file not found: {MODEL_PATH}")
     app.state.model = YOLO(MODEL_PATH)
+    app.state.rag = RAGService()
     yield
 
 
@@ -36,6 +44,22 @@ app.add_middleware(
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/api/chat")
+def chat(request: ChatRequest):
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question cannot be empty.")
+
+    try:
+        return app.state.rag.answer(question)
+    except Exception:
+        logger.exception("Historical RAG answer failed")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not answer from the historical sources. Please try again.",
+        ) from None
 
 
 @app.post("/api/detect")

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from langchain_community.vectorstores import FAISS
@@ -9,7 +10,7 @@ from langchain_ollama import ChatOllama
 from Fort_project.scripts.rag_config import INDEXES_PATH, PDF_DATASETS
 
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-CHAT_MODEL = "qwen3:4b"
+CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen3:4b")
 RESULT_COUNT = 4
 
 ANSWER_PROMPT = ChatPromptTemplate.from_messages(
@@ -56,7 +57,11 @@ class RAGService:
                 raise ValueError(f"FAISS index contains no vectors: {index_path}")
             self.vector_stores.append(vector_store)
 
-        model = ChatOllama(model=CHAT_MODEL, temperature=0)
+        model = ChatOllama(
+            model=CHAT_MODEL,
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            temperature=0,
+        )
         self.answer_chain = ANSWER_PROMPT | model | StrOutputParser()
 
     def answer(self, question: str) -> dict[str, object]:

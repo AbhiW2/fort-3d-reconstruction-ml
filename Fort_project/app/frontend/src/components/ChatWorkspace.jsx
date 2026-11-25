@@ -13,7 +13,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { analyzeImage } from "../services/api.js";
+import { analyzeImage, askQuestion } from "../services/api.js";
 
 const forts = [
   { name: "Sinhagad Fort", location: "Pune" },
@@ -32,7 +32,7 @@ const initialMessages = [
   {
     id: "welcome",
     role: "assistant",
-    text: "Namaskar! Choose your fort and location, then upload a clear gateway photo. I'll show you what the model detects and its confidence score first. If it finds a gateway, you can ask a follow-up about the detection.",
+    text: "Namaskar! Ask a history question and I'll search all seven indexed PDF sources, with citations. You can also choose a fort and upload a gateway photo for visual detection.",
   },
 ];
 
@@ -54,6 +54,7 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isAnswering, setIsAnswering] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
   const selectedFort = forts.find((fort) => fort.name === fortName);
@@ -68,7 +69,7 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
   useEffect(() => {
     const conversation = conversationRef.current;
     if (conversation) conversation.scrollTop = conversation.scrollHeight;
-  }, [messages, isLoading]);
+  }, [messages, isLoading, isAnswering]);
 
   useEffect(() => {
     if (hasGateway && !isLoading) questionInputRef.current?.focus();
@@ -158,8 +159,8 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
           id: `${requestId}-assistant`,
           role: "assistant",
           text: result.detections.length
-            ? `Gateway detected at ${result.fort_name}, ${result.location}. The model found ${result.detections.length} gateway${result.detections.length === 1 ? "" : "s"} with a highest confidence score of ${Math.round(highestConfidence * 100)}%. This score describes the model's confidence in this prediction, not its overall accuracy. You can now ask a follow-up question below.`
-            : `I couldn't detect a gateway in this photo at ${result.fort_name}, ${result.location}. Try a clearer, closer image with the entrance visible. The current model only detects gateways.`,
+            ? `Gateway detected at ${result.fort_name}, ${result.location}. The model found ${result.detections.length} gateway${result.detections.length === 1 ? "" : "s"} with a highest confidence score of ${Math.round(highestConfidence * 100)}%. This score describes the model's confidence in this prediction, not its overall accuracy. Ask about the detection or fort history below.`
+            : `I couldn't detect a gateway in this photo at ${result.fort_name}, ${result.location}. Try a clearer, closer image with the entrance visible. You can still ask a history question below.`,
           result,
         },
       ]);
@@ -178,10 +179,10 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
     }
   }
 
-  function handleQuestionSubmit(event) {
+  async function handleQuestionSubmit(event) {
     event.preventDefault();
     const userQuestion = question.trim();
-    if (!hasGateway || !userQuestion) return;
+    if (!userQuestion || isAnswering) return;
 
     const requestId = `${Date.now()}`;
     setMessages((current) => [
@@ -195,22 +196,58 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
       },
     ]);
     setQuestion("");
+    setError("");
 
     const loweredQuestion = userQuestion.toLowerCase();
-    let response;
-    if (/\b(how many|number of|count)\b/.test(loweredQuestion)) {
-      response = `The model detected ${analysisResult.detections.length} gateway${analysisResult.detections.length === 1 ? "" : "s"} in this image.`;
-    } else if (/\b(confidence|confident|accuracy|accurate|sure)\b/.test(loweredQuestion)) {
-      response = `The highest gateway detection confidence for this image is ${Math.round(maxConfidence * 100)}%. Confidence is the model's score for this prediction; it is not the model's overall accuracy.`;
-    } else {
-      response = "I can report the gateway detections and their confidence scores, but historical and open-ended question answering isn't connected yet. Your photo shows " +
-        `${analysisResult.detections.length} detected gateway${analysisResult.detections.length === 1 ? "" : "s"}, with a highest confidence of ${Math.round(maxConfidence * 100)}%.`;
+    if (hasGateway && /\b(how many|number of|count)\b/.test(loweredQuestion)) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: `The model detected ${analysisResult.detections.length} gateway${analysisResult.detections.length === 1 ? "" : "s"} in this image.`,
+        },
+      ]);
+      return;
     }
 
-    setMessages((current) => [
-      ...current,
-      { id: `${requestId}-assistant`, role: "assistant", text: response },
-    ]);
+    if (hasGateway && /\b(confidence|confident|accuracy|accurate|sure)\b/.test(loweredQuestion)) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: `The highest gateway detection confidence for this image is ${Math.round(maxConfidence * 100)}%. Confidence is the model's score for this prediction; it is not the model's overall accuracy.`,
+        },
+      ]);
+      return;
+    }
+
+    setIsAnswering(true);
+    try {
+      const result = await askQuestion(userQuestion);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${requestId}-assistant`,
+          role: "assistant",
+          text: result.answer,
+          sources: result.sources,
+        },
+      ]);
+    } catch (requestError) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${requestId}-error`,
+          role: "assistant",
+          text: requestError.message || "I couldn't answer from the historical sources.",
+          isError: true,
+        },
+      ]);
+    } finally {
+      setIsAnswering(false);
+    }
   }
 
   function handleClose() {
@@ -230,9 +267,9 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
         <header className="chat-header">
           <a aria-label="Fort Guide home" className="chat-brand" href="#home" onClick={handleClose}>
             <span className="chat-brand-icon"><MessageCircle size={19} /></span>
-            <span><strong id="chat-title">Fort Guide assistant</strong><small>PHOTO EXPLORER · GATEWAY DETECTION</small></span>
+            <span><strong id="chat-title">Fort Guide assistant</strong><small>FORT HISTORY · PHOTO EXPLORER</small></span>
           </a>
-          <span className="chat-status"><span /> Gateway detector ready</span>
+          <span className="chat-status"><span /> History and photo tools ready</span>
           <button aria-label="Close assistant" className="dialog-close" onClick={handleClose}>
             <X size={19} />
           </button>
@@ -252,7 +289,9 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
                     <p>{message.text}</p>
                     {message.role === "user" && (
                       <>
-                        <div className="message-context"><MapPin size={12} /> {message.fortName} · {message.location}</div>
+                        {(message.fortName || message.location) && (
+                          <div className="message-context"><MapPin size={12} /> {message.fortName} · {message.location}</div>
+                        )}
                         {message.previewUrl && (
                           <img alt="Photo attached for analysis" className="message-photo" src={message.previewUrl} />
                         )}
@@ -285,63 +324,86 @@ export default function ChatWorkspace({ onClose, initialFort = "" }) {
                         )}
                       </div>
                     )}
+                    {message.sources?.length > 0 && (
+                      <div className="rag-sources">
+                        <strong>Historical sources</strong>
+                        <ul>
+                          {message.sources.map((source) => (
+                            <li key={source.citation}>
+                              {source.citation} {source.source}, page {source.page}
+                            </li>
+                          ))}
+                        </ul>
+                        <small>Similarity distance is a retrieval signal, not answer confidence.</small>
+                      </div>
+                    )}
                   </div>
                 </article>
               ))}
-              {isLoading && (
+              {(isLoading || isAnswering) && (
                 <div className="typing-indicator" role="status">
                   <span className="message-avatar"><Sparkles size={15} /></span>
-                  <span><LoaderCircle className="spin" size={15} /> Checking your photo for gateways…</span>
+                  <span>
+                    <LoaderCircle className="spin" size={15} />
+                    {isAnswering ? "Searching all historical sources…" : "Checking your photo for gateways…"}
+                  </span>
                 </div>
               )}
             </div>
 
-            {hasGateway ? (
-              <form className="chat-composer" onSubmit={handleQuestionSubmit}>
-                {error && <p className="chat-error" role="alert">{error}</p>}
-                <div className="follow-up-prompt">
-                  <Sparkles size={14} />
-                  <span><strong>Gateway found.</strong> What would you like to know about this photo?</span>
-                </div>
-                <div className="composer-row">
-                  <label className="visually-hidden" htmlFor="chat-question">Ask a follow-up question</label>
-                  <input
-                    autoComplete="off"
-                    id="chat-question"
-                    onChange={(event) => setQuestion(event.target.value)}
-                    placeholder="Ask about gateway confidence or detections…"
-                    ref={questionInputRef}
-                    value={question}
-                  />
-                  <button
-                    aria-label="Send follow-up question"
-                    className="send-message-button"
-                    disabled={!question.trim()}
-                    title="Send your question"
-                    type="submit"
-                  >
-                    <ArrowUp size={19} />
-                  </button>
-                </div>
-                <p className="composer-disclaimer"><Info size={12} /> I can answer questions about detection results. Historical answers aren't available yet.</p>
-              </form>
-            ) : (
+            {!hasGateway && (
               <div className="analysis-prompt">
                 <span className="analysis-prompt-icon"><ScanSearch size={18} /></span>
                 <p>
                   {analysisResult
-                    ? "No gateway was detected. Try another photo to continue."
-                    : "Choose a fort and upload its gateway photo. Your detection and confidence score will appear here."}
+                    ? "No gateway was detected. You can still ask about fort history using the source library below."
+                    : "Photo analysis is optional. Ask a historical question below or upload a gateway photo."}
                 </p>
               </div>
             )}
+            <form className="chat-composer" onSubmit={handleQuestionSubmit}>
+              {error && <p className="chat-error" role="alert">{error}</p>}
+              <div className="follow-up-prompt">
+                <Sparkles size={14} />
+                <span>
+                  <strong>{hasGateway ? "Gateway found." : "Historical research."}</strong>{" "}
+                  {hasGateway
+                    ? "Ask about the detection or search all seven PDF sources."
+                    : "Ask a question across all seven indexed PDF sources."}
+                </span>
+              </div>
+              <div className="composer-row">
+                <label className="visually-hidden" htmlFor="chat-question">Ask a history or detection question</label>
+                <input
+                  autoComplete="off"
+                  id="chat-question"
+                  maxLength={2000}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder="Ask about Maharashtra's forts and history…"
+                  ref={questionInputRef}
+                  value={question}
+                />
+                <button
+                  aria-label="Send question"
+                  className="send-message-button"
+                  disabled={!question.trim() || isAnswering}
+                  title="Send your question"
+                  type="submit"
+                >
+                  {isAnswering ? <LoaderCircle className="spin" size={17} /> : <ArrowUp size={19} />}
+                </button>
+              </div>
+              <p className="composer-disclaimer">
+                <Info size={12} /> Historical answers use all seven indexed PDFs and show their source pages.
+              </p>
+            </form>
           </section>
 
           <aside aria-label="Photo and fort details" className="chat-sidebar">
             <div className="sidebar-title">
               <span className="eyebrow"><ScanSearch size={14} /> NEW ANALYSIS</span>
               <h2>Tell us what you're exploring</h2>
-              <p>Choose the fort and location, upload a photo, then run the gateway check.</p>
+              <p>Ask a question across all seven PDF sources. Fort details and a photo are optional for gateway detection.</p>
             </div>
 
             <div className="chat-field">
