@@ -1,0 +1,123 @@
+name: CI and GHCR publish
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU-only PyTorch
+        run: python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+
+      - name: Install backend dependencies
+        run: python -m pip install -r Fort_project/requirements-api.txt
+
+      - name: Run backend tests
+        run: python -m unittest discover -s Fort_project/tests
+
+  frontend-build:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Fort_project/app/frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: Fort_project/app/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  publish-images:
+    name: Build and publish Docker images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - backend-tests
+      - frontend-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Normalize GHCR owner
+        id: owner
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: echo "value=${REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare API image metadata
+        id: api-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.value }}/fort-3d-reconstruction-ml-api
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest
+
+      - name: Build and publish API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./Fort_project
+          file: ./Fort_project/Dockerfile
+          push: true
+          tags: ${{ steps.api-meta.outputs.tags }}
+          labels: ${{ steps.api-meta.outputs.labels }}
+
+      - name: Prepare frontend image metadata
+        id: frontend-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.value }}/fort-3d-reconstruction-ml-web
+          tags: |
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest
+
+      - name: Build and publish frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./Fort_project/app/frontend
+          file: ./Fort_project/app/frontend/Dockerfile
+          push: true
+          tags: ${{ steps.frontend-meta.outputs.tags }}
+          labels: ${{ steps.frontend-meta.outputs.labels }}
