@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -121,3 +122,106 @@ jobs:
           push: true
           tags: ${{ steps.frontend-meta.outputs.tags }}
           labels: ${{ steps.frontend-meta.outputs.labels }}
+
+  deploy-ec2:
+    name: Deploy to EC2 through SSM
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+      IMAGE_TAG: sha-${{ github.sha }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate deployment settings
+        shell: bash
+        run: |
+          for name in AWS_DEPLOY_ROLE_ARN AWS_REGION EC2_INSTANCE_ID; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Set the $name repository variable before deploying."
+              exit 1
+            fi
+          done
+
+      - name: Verify published image tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+          docker manifest inspect "ghcr.io/abhiw2/fort-3d-reconstruction-ml-api:${IMAGE_TAG}" > /dev/null
+          docker manifest inspect "ghcr.io/abhiw2/fort-3d-reconstruction-ml-web:${IMAGE_TAG}" > /dev/null
+
+      - name: Configure AWS credentials with OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: FortProjectDeployment
+
+      - name: Deploy through Systems Manager
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import shlex
+
+          script = Path("Fort_project/scripts/deploy-ec2.sh").read_text()
+          tag = os.environ["IMAGE_TAG"]
+          command = f"IMAGE_TAG={shlex.quote(tag)} bash -s <<'FORT_DEPLOY_SCRIPT'\n{script}\nFORT_DEPLOY_SCRIPT"
+          request = {
+              "DocumentName": "AWS-RunShellScript",
+              "InstanceIds": [os.environ["EC2_INSTANCE_ID"]],
+              "Parameters": {"commands": [command]},
+              "TimeoutSeconds": 1800,
+              "Comment": f"Deploy Fort project image {tag}",
+          }
+          Path("ssm-request.json").write_text(json.dumps(request))
+          PY
+
+          command_id=$(aws ssm send-command \
+            --cli-input-json file://ssm-request.json \
+            --query 'Command.CommandId' \
+            --output text)
+          echo "SSM command: $command_id"
+
+          for attempt in {1..180}; do
+            status=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query Status \
+              --output text 2>/dev/null || echo Pending)
+            case "$status" in
+              Success)
+                break
+                ;;
+              Failed|TimedOut|Cancelled|Cancelling|DeliveryTimedOut|ExecutionTimedOut|Undeliverable|Terminated)
+                aws ssm get-command-invocation \
+                  --command-id "$command_id" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+                  --output json
+                exit 1
+                ;;
+            esac
+            if [[ "$attempt" -eq 180 ]]; then
+              echo "::error::Timed out waiting for the EC2 deployment command."
+              exit 1
+            fi
+            sleep 10
+          done
+
+          aws ssm get-command-invocation \
+            --command-id "$command_id" \
+            --instance-id "$EC2_INSTANCE_ID" \
+            --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}' \
+            --output json
