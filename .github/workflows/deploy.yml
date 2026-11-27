@@ -50,7 +50,8 @@ jobs:
         env:
           EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
         run: |
-          B64=$(base64 -w0 Fort_project/scripts/deploy-ec2.sh)
+          # tr removes Windows CR characters so bash on Linux can run the script
+          B64=$(tr -d '\r' < Fort_project/scripts/deploy-ec2.sh | base64 -w0)
           jq -n --arg b64 "$B64" --arg tag "$IMAGE_TAG" \
             '{commands: ["echo \($b64) | base64 -d > /tmp/deploy-ec2.sh", "IMAGE_TAG=\($tag) bash /tmp/deploy-ec2.sh"]}' > params.json
 
