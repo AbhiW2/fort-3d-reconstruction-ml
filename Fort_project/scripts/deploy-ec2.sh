@@ -20,6 +20,7 @@ while IFS= read -r candidate; do
   service=$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$candidate")
   image=$(docker inspect --format '{{.Config.Image}}' "$candidate")
   if [[ "$service" == "api" && ( "$image" == "fort-api:local" || "$image" == "fort-api:prod" || "$image" == ghcr.io/abhiw2/fort-3d-reconstruction-ml-api:* ) ]]; then
+    api_container="$candidate"
     break
   fi
 done < <(docker ps -q)
