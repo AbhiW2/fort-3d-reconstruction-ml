@@ -41,10 +41,24 @@ jobs:
           docker manifest inspect "$WEB_IMAGE:$IMAGE_TAG" > /dev/null
           echo "Both images found for $IMAGE_TAG"
 
+      # DEBUG step: prints what GitHub sends to AWS. Remove once the login works.
+      - name: Debug OIDC login values
+        env:
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          REGION: ${{ vars.AWS_REGION }}
+        run: |
+          echo "Role ARN : [$ROLE_ARN]"
+          echo "Length   : ${#ROLE_ARN} (expected 57)"
+          echo "Region   : [$REGION]"
+          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          # Print only the claims (not the token itself)
+          echo "$TOKEN" | python3 -c "import sys,json,base64; p=sys.stdin.read().strip().split('.')[1]; p+='='*(-len(p)%4); c=json.loads(base64.urlsafe_b64decode(p)); print(json.dumps({k:c.get(k) for k in ['iss','aud','sub','repository','ref','job_workflow_ref']}, indent=2))"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          retry-max-attempts: 2
 
       - name: Send deploy command to EC2 through SSM
         env:
