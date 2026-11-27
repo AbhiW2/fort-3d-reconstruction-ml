@@ -107,7 +107,7 @@ export default function App() {
         <a aria-label="Fort Guide home" className="brand" href="#home">
           <span className="brand-mark"><Landmark size={26} strokeWidth={1.8} /></span>
           <span className="brand-copy">
-            <strong>Fort Guide</strong>
+            <strong>Savardhan</strong>
             <small>AI heritage explorer</small>
           </span>
         </a>
